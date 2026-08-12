@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import pipeline_utils
+import os
 
 
 # Setup page config
@@ -16,8 +17,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# API URL
-API_URL = "http://127.0.0.1:8000"
+# API URL - read from secrets or environment, default to local for development
+API_URL = st.secrets.get("API_URL", os.getenv("API_URL", "http://127.0.0.1:8000"))
 
 # Inject Custom CSS for Premium Slate/Glassmorphism Theme
 st.markdown("""
