@@ -10,6 +10,13 @@ app = FastAPI(title="Medical Clinical Diagnostic Pipeline API", version="1.0.0")
 # Global reference to cache the trained secure pipeline
 FITTED_PIPELINE = None
 
+@app.get("/")
+def health_check():
+    """
+    Health check endpoint to verify API is running.
+    """
+    return {"status": "ok", "message": "Medical Clinical Diagnostic Pipeline API is running"}
+
 class TrainConfig(BaseModel):
     estimator_type: str = Field(default="rf", description="Model type: 'rf' (Random Forest), 'gb' (Gradient Boosting), 'lr' (Logistic Regression)")
     imputer_strategy: str = Field(default="mean", description="Imputation strategy: 'mean', 'median', 'most_frequent'")
