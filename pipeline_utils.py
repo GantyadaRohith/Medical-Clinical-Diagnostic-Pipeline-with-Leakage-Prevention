@@ -8,13 +8,23 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, roc_curve, confusion_matrix
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+import os
 
 # Define numerical and categorical columns
 NUM_COLS = ['age', 'creatinine_phosphokinase', 'ejection_fraction', 'platelets', 'serum_creatinine', 'serum_sodium', 'time']
 CAT_COLS = ['anaemia', 'diabetes', 'high_blood_pressure', 'sex', 'smoking']
 TARGET_COL = 'DEATH_EVENT'
 
-def load_data(filepath="Heart_failure_clinical_records_dataset.csv", missing_pct=0.10, seed=42):
+def load_data(filepath=None, missing_pct=0.10, seed=42):
+    """
+    Loads the clinical records dataset and artificially injects missing values (NaN)
+    in specific numerical columns to simulate raw clinical data requiring imputation.
+    """
+    # If filepath not provided, find it relative to this module
+    if filepath is None:
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        filepath = os.path.join(module_dir, "Heart_failure_clinical_records_dataset.csv")
+    
     """
     Loads the clinical records dataset and artificially injects missing values (NaN)
     in specific numerical columns to simulate raw clinical data requiring imputation.
