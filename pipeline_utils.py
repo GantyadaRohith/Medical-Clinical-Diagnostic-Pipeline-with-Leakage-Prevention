@@ -288,3 +288,107 @@ def single_patient_diagnostic(patient_data, pipeline_fitted):
         'prediction': prediction
     }
     return trace
+
+def recommend_algorithm(df, target_col):
+    """
+    Analyzes dataset characteristics and automatically recommends the best machine learning algorithm.
+    It returns the recommended algorithm code ('rf', 'gb', 'lr'), a list of structured reasons,
+    and a dictionary of computed dataset metrics.
+    """
+    # 1. Basic properties
+    num_samples = len(df)
+    num_features = len(df.columns) - 1  # excluding target
+    
+    # Calculate missing values
+    missing_pct = df.drop(columns=[target_col]).isnull().mean().mean()  # average missing percentage across features
+    has_missing = df.drop(columns=[target_col]).isnull().any().any()
+    
+    # Target analysis
+    target = df[target_col]
+    target_type = "classification"
+    if pd.api.types.is_numeric_dtype(target):
+        unique_vals = target.dropna().unique()
+        if len(unique_vals) > 10:  # arbitrary threshold for regression
+            target_type = "regression"
+    else:
+        target_type = "classification"
+        
+    # Class imbalance (for classification)
+    imbalance_ratio = 1.0
+    is_imbalanced = False
+    if target_type == "classification":
+        counts = target.value_counts(normalize=True)
+        if len(counts) >= 2:
+            min_class_pct = counts.min()
+            max_class_pct = counts.max()
+            imbalance_ratio = max_class_pct / min_class_pct
+            if imbalance_ratio > 1.5:  # 60/40 split or worse
+                is_imbalanced = True
+                
+    # Feature types
+    num_numerical = 0
+    num_categorical = 0
+    for col in df.drop(columns=[target_col]).columns:
+        if pd.api.types.is_numeric_dtype(df[col]) and len(df[col].dropna().unique()) > 5:  # simple heuristic
+            num_numerical += 1
+        else:
+            num_categorical += 1
+            
+    categorical_ratio = num_categorical / (num_numerical + num_categorical) if (num_numerical + num_categorical) > 0 else 0
+    
+    # Decision logic
+    reasons = []
+    recommended = 'rf'  # default
+    
+    reasons.append(f"Dataset has {num_samples} samples and {num_features} features.")
+    
+    if target_type == "regression":
+        recommended = 'rf'  # simple default, but flag it
+        reasons.append("Warning: Target appears to be continuous (regression). This pipeline is designed for classification, but Random Forest is generally robust for regression too.")
+    else:
+        # Rules for classification:
+        if num_samples < 500:
+            # Small dataset: prefer Logistic Regression or Random Forest to avoid overfitting.
+            if has_missing or categorical_ratio > 0.4:
+                recommended = 'rf'
+                reasons.append("The dataset is relatively small (< 500 samples). Random Forest is selected because it handles missing values and categorical features robustly without overfitting.")
+            else:
+                recommended = 'lr'
+                reasons.append("The dataset is relatively small (< 500 samples) and features are mostly numeric. Logistic Regression is recommended as a simple, interpretable linear model that generalizes well on small datasets.")
+        else:
+            # Larger dataset
+            if is_imbalanced:
+                # Class imbalance: Random Forest performs well with bagging reducing variance
+                recommended = 'rf'
+                reasons.append(f"Class imbalance detected (imbalance ratio: {imbalance_ratio:.2f}). Random Forest is recommended because bagging reduces variance and handles imbalanced classes more robustly than boosting or linear models.")
+            elif missing_pct > 0.15:
+                # Heavy missing data
+                recommended = 'rf'
+                reasons.append(f"Significant missing data detected (approx {missing_pct*100:.1f}% on average). Random Forest handles imputation noise better than boosting and linear models.")
+            elif num_samples > 1000:
+                # Large clean dataset, no heavy imbalance: Gradient Boosting should yield best accuracy
+                recommended = 'gb'
+                reasons.append(f"Sufficient sample size ({num_samples} records) and low missing data detected. Gradient Boosting is recommended as it iteratively minimizes errors to achieve high predictive accuracy.")
+            else:
+                recommended = 'rf'
+                reasons.append("Random Forest is recommended as a strong non-linear baseline that handles mixed numerical/categorical features and missing values with minimal tuning.")
+
+    # Let's map target type
+    target_desc = "Binary Classification" if len(target.unique()) == 2 else "Multiclass Classification"
+    if target_type == "regression":
+        target_desc = "Regression (Continuous)"
+        
+    metrics_summary = {
+        "num_samples": num_samples,
+        "num_features": num_features,
+        "missing_pct": float(missing_pct),
+        "target_type": target_desc,
+        "is_imbalanced": is_imbalanced,
+        "imbalance_ratio": float(imbalance_ratio),
+        "categorical_ratio": float(categorical_ratio),
+        "numerical_features": num_numerical,
+        "categorical_features": num_categorical
+    }
+    
+    return recommended, reasons, metrics_summary
+

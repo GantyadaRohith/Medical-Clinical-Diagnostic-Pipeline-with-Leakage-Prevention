@@ -7,6 +7,42 @@ import plotly.graph_objects as go
 import json
 import pipeline_utils
 import os
+from urllib.parse import urlparse
+
+
+def _read_streamlit_secret(key):
+    try:
+        return st.secrets.get(key)
+    except Exception:
+        return None
+
+
+def resolve_api_url():
+    """Prefer explicit backend config, but never call the app's own Render hostname.
+
+    Free Render instances cold-start after inactivity, so a self-hosted call can
+    block for 50+ seconds. When the configured URL points back to the current app's
+    Render domain, fall back to the local backend instead.
+    """
+    candidates = []
+    for key in ["BACKEND_API_URL", "API_URL"]:
+        value = os.getenv(key)
+        if value:
+            candidates.append(value)
+        secret_value = _read_streamlit_secret(key)
+        if secret_value:
+            candidates.append(secret_value)
+
+    for value in candidates:
+        url = str(value).strip().rstrip("/")
+        if not url:
+            continue
+        host = urlparse(url).hostname or ""
+        if host and host.endswith(".onrender.com"):
+            return "http://127.0.0.1:8000"
+        return url
+
+    return "http://127.0.0.1:8000"
 
 
 # Setup page config
@@ -17,8 +53,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# API URL - read from secrets or environment, default to local for development
-API_URL = st.secrets.get("API_URL", os.getenv("API_URL", "http://127.0.0.1:8000"))
+# API URL - prefer explicit backend configuration, but avoid self-hosting on Render free tier
+API_URL = resolve_api_url()
+API_TIMEOUT_SECONDS = 90
 
 # Inject Custom CSS for Premium Slate/Glassmorphism Theme
 st.markdown("""
@@ -162,6 +199,49 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Get Dataset statistics and algorithm recommendation immediately
+@st.cache_data
+def fetch_dataset_info():
+    try:
+        response = requests.get(f"{API_URL}/data-info", timeout=API_TIMEOUT_SECONDS)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"API Error: {response.status_code} - {response.text}")
+            return None
+    except requests.exceptions.Timeout:
+        st.warning(
+            "The backend is starting up after inactivity. Render free instances can take 50+ seconds to wake up. "
+            "Please wait a moment and retry."
+        )
+        return None
+    except requests.exceptions.ConnectionError as e:
+        st.error(f"Cannot connect to API at {API_URL}. Is the backend running? Error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error fetching dataset info: {str(e)}")
+        return None
+
+@st.cache_data
+def fetch_algorithm_recommendation():
+    try:
+        response = requests.get(f"{API_URL}/recommend-algorithm", timeout=API_TIMEOUT_SECONDS)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"API Error: {response.status_code} - {response.text}")
+            return None
+    except requests.exceptions.Timeout:
+        return None
+    except requests.exceptions.ConnectionError:
+        return None
+    except Exception as e:
+        st.error(f"Error fetching algorithm recommendation: {str(e)}")
+        return None
+
+data_info = fetch_dataset_info()
+recommendation_info = fetch_algorithm_recommendation()
+
 # App Header
 st.markdown('<div class="main-title">🛡️ SafeClinical Diagnostics</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Medical Diagnostic Pipeline with Zero-Leakage Preprocessing & Validation</div>', unsafe_allow_html=True)
@@ -171,11 +251,55 @@ st.markdown('<div class="sub-title">Medical Diagnostic Pipeline with Zero-Leakag
 # -----------------
 st.sidebar.markdown("### ⚙️ Pipeline Configuration")
 
+# Initialize session state for selected estimator
+if 'sidebar_estimator' not in st.session_state:
+    st.session_state['sidebar_estimator'] = "rf"
+
+# Render Smart Routing recommendation if available
+if recommendation_info:
+    rec_algo = recommendation_info["recommended_algorithm"]
+    reasons = recommendation_info["reasons"]
+    
+    algo_name_map = {
+        "rf": "Random Forest Classifier",
+        "gb": "Gradient Boosting Classifier",
+        "lr": "Logistic Regression"
+    }
+    rec_algo_name = algo_name_map.get(rec_algo, rec_algo)
+    
+    st.sidebar.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, rgba(0, 242, 254, 0.08) 0%, rgba(79, 172, 254, 0.08) 100%);
+        border: 1px solid rgba(0, 242, 254, 0.2);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 15px;
+    ">
+        <div style="font-weight: 700; color: #00f2fe; font-size: 0.75rem; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">
+            🤖 Smart Router Recommendation
+        </div>
+        <div style="font-size: 1.05rem; font-weight: 700; color: #ffffff; margin-bottom: 6px;">
+            {rec_algo_name}
+        </div>
+        <div style="font-size: 0.75rem; color: #cbd5e1; line-height: 1.3;">
+            {reasons[-1] if reasons else "Selected based on dataset parameters."}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Check if currently active is different from recommended to show the button
+    if st.session_state['sidebar_estimator'] != rec_algo:
+        if st.sidebar.button("🤖 Use Recommended Classifier", use_container_width=True, help=f"Set estimator to {rec_algo_name}"):
+            st.session_state['sidebar_estimator'] = rec_algo
+            st.toast(f"Switched estimator to recommended {rec_algo_name}!", icon="🤖")
+            st.rerun()
+
 estimator = st.sidebar.selectbox(
     "1. Estimator Classifier",
     options=["rf", "gb", "lr"],
     format_func=lambda x: "Random Forest Classifier" if x=="rf" else "Gradient Boosting" if x=="gb" else "Logistic Regression",
-    help="Select the classification algorithm."
+    help="Select the classification algorithm.",
+    key="sidebar_estimator"
 )
 
 imputer = st.sidebar.selectbox(
@@ -223,24 +347,7 @@ tab_concept, tab_data, tab_metrics, tab_predict = st.tabs([
     "🩺 Patient Risk Calculator"
 ])
 
-# Get Dataset statistics immediately for other tabs
-@st.cache_data
-def fetch_dataset_info():
-    try:
-        response = requests.get(f"{API_URL}/data-info", timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"API Error: {response.status_code} - {response.text}")
-            return None
-    except requests.exceptions.ConnectionError as e:
-        st.error(f"Cannot connect to API at {API_URL}. Is the backend running? Error: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Error fetching dataset info: {str(e)}")
-        return None
-
-data_info = fetch_dataset_info()
+# Dataset stats and recommendations loaded at startup
 
 # ---------------------------------------------
 # TAB 1: DATA LEAKAGE & SECURITY CONCEPT
@@ -376,6 +483,49 @@ with tab_data:
                 summary_stats = pd.DataFrame(data_info["summary_stats"])
                 # Format and show subset
                 st.dataframe(summary_stats.loc[['mean', 'std', 'min', 'max'], pipeline_utils.NUM_COLS].T, height=350)
+            
+            # Smart Routing Recommendation details at the bottom of the tab
+            st.markdown("---")
+            st.markdown("### 🤖 Smart Routing Analysis")
+            if recommendation_info:
+                metrics = recommendation_info["dataset_metrics"]
+                reasons = recommendation_info["reasons"]
+                rec_algo = recommendation_info["recommended_algorithm"]
+                
+                algo_name_map = {
+                    "rf": "Random Forest Classifier",
+                    "gb": "Gradient Boosting Classifier",
+                    "lr": "Logistic Regression"
+                }
+                rec_algo_name = algo_name_map.get(rec_algo, rec_algo)
+                
+                col_r1, col_r2 = st.columns([1, 2])
+                with col_r1:
+                    st.markdown(f"""
+                    <div class="secure-box" style="padding: 20px; border-radius: 12px; height: 100%;">
+                        <h5 style="color: #00f2fe; margin-top:0;">Dataset Characteristics Checklist</h5>
+                        <ul style="font-size: 0.9rem; padding-left: 20px; line-height: 1.6; margin-bottom: 0;">
+                            <li><b>Target Type:</b> {metrics['target_type']}</li>
+                            <li><b>Data Imbalance:</b> {'Yes' if metrics['is_imbalanced'] else 'No'} (Ratio: {metrics['imbalance_ratio']:.2f})</li>
+                            <li><b>Features:</b> {metrics['num_features']} ({metrics['numerical_features']} numerical, {metrics['categorical_features']} categorical)</li>
+                            <li><b>Avg Missingness:</b> {metrics['missing_pct']*100:.1f}%</li>
+                            <li><b>Sample Size:</b> {metrics['num_samples']} rows</li>
+                        </ul>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_r2:
+                    reasons_html = "".join([f"<li style='margin-bottom: 6px;'>{r}</li>" for r in reasons])
+                    st.markdown(f"""
+                    <div class="glass-card" style="padding: 20px; border-radius: 12px; height: 100%; margin-bottom: 0px !important;">
+                        <h5 style="color: #8da2fb; margin-top:0;">Routing Rationale & Recommendation</h5>
+                        <p style="margin-bottom: 8px;">Based on the data characteristics, the pipeline recommends using <b>{rec_algo_name}</b>.</p>
+                        <ul style="font-size: 0.9rem; padding-left: 20px; line-height: 1.5; margin-bottom: 0;">
+                            {reasons_html}
+                        </ul>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.warning("Algorithm recommendation data could not be retrieved from the backend API.")
     else:
         st.warning("Could not contact the FastAPI backend to retrieve dataset information. Make sure it is running on port 8000.")
 
@@ -398,10 +548,12 @@ with tab_metrics:
                     "cv_folds": cv_folds,
                     "test_size": test_size
                 }
-                res = requests.post(f"{API_URL}/train", json=payload)
+                res = requests.post(f"{API_URL}/train", json=payload, timeout=API_TIMEOUT_SECONDS)
                 if res.status_code == 200:
                     st.session_state['train_results'] = res.json()
                     st.session_state['trained_config'] = payload
+            except requests.exceptions.Timeout:
+                st.warning("The backend is warming up after inactivity. This free-tier instance may take 50+ seconds to respond.")
             except Exception as e:
                 st.error(f"Failed to connect to backend for training: {str(e)}")
                 
@@ -415,13 +567,15 @@ with tab_metrics:
                     "cv_folds": cv_folds,
                     "test_size": test_size
                 }
-                res = requests.post(f"{API_URL}/train", json=payload)
+                res = requests.post(f"{API_URL}/train", json=payload, timeout=API_TIMEOUT_SECONDS)
                 if res.status_code == 200:
                     st.session_state['train_results'] = res.json()
                     st.session_state['trained_config'] = payload
                     st.toast("Model updated successfully!", icon="🔥")
                 else:
                     st.error(f"Training failed: {res.text}")
+            except requests.exceptions.Timeout:
+                st.warning("The Render backend is still waking up. This free-tier instance can take around 50+ seconds to respond after inactivity.")
             except Exception as e:
                 st.error(f"Failed to connect to backend: {str(e)}")
                 
@@ -688,7 +842,7 @@ with tab_predict:
                     cleaned_payload[k] = v
                     
             try:
-                res = requests.post(f"{API_URL}/predict", json=cleaned_payload)
+                res = requests.post(f"{API_URL}/predict", json=cleaned_payload, timeout=API_TIMEOUT_SECONDS)
                 if res.status_code == 200:
                     trace_data = res.json()
                     

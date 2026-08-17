@@ -159,6 +159,23 @@ def predict_patient(patient: PatientData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction trace failed: {str(e)}")
 
+@app.get("/recommend-algorithm")
+def recommend_algorithm():
+    """
+    Analyzes dataset characteristics and returns the recommended machine learning algorithm,
+    along with explanation reasons and computed dataset metrics.
+    """
+    try:
+        df, _ = pipeline_utils.load_data()
+        recommended, reasons, metrics = pipeline_utils.recommend_algorithm(df, pipeline_utils.TARGET_COL)
+        return {
+            "recommended_algorithm": recommended,
+            "reasons": reasons,
+            "dataset_metrics": metrics
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recommendation failed: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)

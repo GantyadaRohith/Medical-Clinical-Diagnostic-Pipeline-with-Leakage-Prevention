@@ -1,0 +1,32 @@
+# UI Container Layout Refactoring Walkthrough
+
+We successfully resolved the issue where Streamlit charts, metrics, and dataframes rendered outside (below) the custom glassmorphism card elements. By replacing manual HTML `div` wrappers with Streamlit's native `st.container(key="...")` elements, we allowed the layout engine to group components correctly. The custom CSS targets the automatic Streamlit container keys (`div[class*="st-key-"]`) to apply the premium slate/glassmorphism design.
+
+## Changes Made
+
+### 1. Injected CSS Styling in `app_dashboard.py`
+- Linked all custom container keys to the `.glass-card` styling rules.
+- Set a fixed height (`500px`) for charts (`roc_card`, `secure_cm_card`, `leaky_cm_card`) to maintain clean alignment.
+- Centered layout elements in `risk_summary_card`.
+
+### 2. Tab-by-Tab Layout Upgrades
+- **Tab 1 (Data Leakage & Security)**: Replaced outer raw `div` with `st.container(key="concept_card")` and consolidated the nested description boxes into single `st.markdown` calls.
+- **Tab 2 (Dataset Statistics)**: Grouped target class pie chart, missing feature chart, and summary dataframe in `st.container(key="dataset_overview_card")`.
+- **Tab 3 (Model Comparison)**: Wrapped metrics, comparison gap charts, ROC curves, confusion matrices, and feature importance bar chart into their respective containers (`secure_results_card`, `leaky_results_card`, `gap_card`, `roc_card`, `secure_cm_card`, `leaky_cm_card`, `importance_card`).
+- **Tab 4 (Patient Risk Calculator)**: Grouped inputs into `input_panel_card`, mortality risk summary into `risk_summary_card`, and execution steps trace into `trace_card`.
+
+---
+
+## Visual Verification (Screenshots)
+
+We ran full end-to-end visual tests using the browser subagent to verify the new rendering on the live dashboard.
+
+````carousel
+![Tab 1: Leakage and Security Concept](file:///C:/Users/rohit/.gemini/antigravity-ide/brain/f1c97a43-b47a-4ba4-8930-9d540999c5f6/dashboard_layout_view_1786550050617.png)
+<!-- slide -->
+![Tab 2: Dataset Statistics Overview](file:///C:/Users/rohit/.gemini/antigravity-ide/brain/f1c97a43-b47a-4ba4-8930-9d540999c5f6/dataset_statistics_view_1786550095092.png)
+<!-- slide -->
+![Tab 3: Model Comparison Generalization Gap & ROC](file:///C:/Users/rohit/.gemini/antigravity-ide/brain/f1c97a43-b47a-4ba4-8930-9d540999c5f6/model_comparison_view_1786550110072.png)
+<!-- slide -->
+![Tab 4: Patient Diagnostic Calculator Outputs](file:///C:/Users/rohit/.gemini/antigravity-ide/brain/f1c97a43-b47a-4ba4-8930-9d540999c5f6/patient_calculator_results_view_1786550145010.png)
+````

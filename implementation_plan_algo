@@ -1,0 +1,57 @@
+# Smart Algorithm Routing & Recommendation
+
+Add a smart routing function that analyzes the characteristics of a dataset (number of features, missing value rates, target type, class imbalance) and recommends the best classification algorithm. Introduce a dedicated API endpoint for this recommendation and integrate it into the Streamlit dashboard with a premium UI layout.
+
+## User Review Required
+No breaking changes are expected. The existing manual selector will remain fully functional, and the recommendation will act as an intelligent guide that users can apply with a single click.
+
+## Proposed Changes
+
+---
+
+### Machine Learning Core
+
+#### [MODIFY] [pipeline_utils.py](file:///c:/ibm%20prOJECT/pipeline_utils.py)
+* Add a `recommend_algorithm(df, target_col)` function.
+* This function will:
+  1. Calculate sample size, feature counts, numerical/categorical feature ratio.
+  2. Inspect missing value distribution across features.
+  3. Determine target characteristics (data type, unique counts) to verify it is classification.
+  4. Measure class imbalance ratio for classification.
+  5. Return a recommended algorithm (`'rf'`, `'gb'`, or `'lr'`), a list of structured reasons, and computed dataset metrics.
+
+---
+
+### Backend API
+
+#### [MODIFY] [app_api.py](file:///c:/ibm%20prOJECT/app_api.py)
+* Register a new endpoint: `GET /recommend-algorithm`.
+* The endpoint will:
+  1. Load the dataset (using `pipeline_utils.load_data`).
+  2. Invoke `pipeline_utils.recommend_algorithm`.
+  3. Return a JSON response with:
+     * `recommended_algorithm`: `'rf'`, `'gb'`, or `'lr'`
+     * `reasons`: List of strings explaining the choice
+     * `dataset_metrics`: Object containing computed statistics
+
+---
+
+### Streamlit UI
+
+#### [MODIFY] [app_dashboard.py](file:///c:/ibm%20prOJECT/app_dashboard.py)
+* Fetch the recommendation from `/recommend-algorithm` (cached to avoid redundant calls).
+* Add a premium card under the **Pipeline Configuration** sidebar or **Dataset Statistics** tab titled `🤖 Smart Algorithm Router`.
+* Style the recommendation card with glassmorphism, visual icons, and clear text outlining the reasons.
+* Add an **"Apply Recommended Model"** button that dynamically updates the sidebar selectbox settings.
+
+---
+
+## Verification Plan
+
+### Automated Verification
+* Verify the `/recommend-algorithm` API endpoint returns a `200 OK` status and a valid JSON structure with keys: `recommended_algorithm`, `reasons`, and `dataset_metrics`.
+
+### Manual Verification
+* Run both the FastAPI server and Streamlit dashboard.
+* Verify the recommendation card displays correctly and lists logical reasons matching the Heart Failure dataset characteristics (small sample size, presence of missing values, class imbalance).
+* Click the "Apply Recommended Model" button and verify that the estimator dropdown adjusts automatically.
