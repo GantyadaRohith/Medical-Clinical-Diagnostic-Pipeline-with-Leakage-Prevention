@@ -33,12 +33,18 @@ def resolve_api_url():
         if secret_value:
             candidates.append(secret_value)
 
+    # Get the hostname of this service if deployed on Render
+    current_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip().lower()
+
     for value in candidates:
         url = str(value).strip().rstrip("/")
         if not url:
             continue
-        host = urlparse(url).hostname or ""
-        if host and host.endswith(".onrender.com"):
+        host = (urlparse(url).hostname or "").strip().lower()
+        
+        # Only fall back to localhost if host is pointing back to this service's own domain.
+        # If it's a different Render service (e.g. backend.onrender.com), we should use it.
+        if current_render_host and host == current_render_host:
             return "http://127.0.0.1:8000"
         return url
 
